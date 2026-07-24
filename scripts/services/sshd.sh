@@ -11,40 +11,76 @@ if command -v sshd &>/dev/null; then
       echo "✅ SSH service is already running"
    else
       echo "⚠️  SSH is installed but not running, starting..."
-      systemctl enable ssh
-      systemctl start ssh
+      sudo systemctl enable ssh
+      sudo systemctl start ssh
       echo "✅ SSH service started"
    fi
 else
    # ── Install ────────────────────────────────────────────────
    echo "📦 Installing openssh-server..."
-   apt update -qq && apt install -y -qq openssh-server
+   sudo apt update -qq && sudo apt install -y -qq openssh-server
    echo "✅ openssh-server installed"
    echo ""
 
    # ── Backup config ──────────────────────────────────────────
    echo "💾 Backing up sshd_config..."
-   cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+   sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
    echo "✅ Backup saved to /etc/ssh/sshd_config.bak"
    echo ""
-
-   # ── Security settings ─────────────────────────────────────
-   echo "🔧 Applying security settings..."
-   sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-   sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-   sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-   echo "   🔒 Root login disabled"
-   echo "   🔑 Password authentication enabled"
-   echo "   🔑 Public key authentication enabled"
-   echo "✅ Security settings applied"
-   echo ""
-
-   # ── Enable and start ──────────────────────────────────────
-   echo "⚙️  Enabling and starting SSH service..."
-   systemctl enable ssh
-   systemctl restart ssh
-   echo "✅ SSH service is running"
 fi
+
+# ── Security settings (always applied) ─────────────────────
+echo "🔧 Applying security settings..."
+
+# Ubuntu 22.04+ / Debian 12+ ship drop-in configs that override the main file
+if [ -d /etc/ssh/sshd_config.d ]; then
+   for conf in /etc/ssh/sshd_config.d/*.conf; do
+      [ -f "$conf" ] || continue
+      sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' "$conf"
+      sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' "$conf"
+   done
+fi
+
+sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config
+echo "   🔒 Root login disabled"
+echo "   🔑 Password authentication disabled (key-only)"
+echo "   🔑 Public key authentication enabled"
+echo "   🔒 MaxAuthTries = 3"
+echo "   🔒 X11Forwarding disabled"
+
+# ── SSH key check ─────────────────────────────────────────
+AUTH_KEYS="$HOME/.ssh/authorized_keys"
+if [ ! -f "$AUTH_KEYS" ] || [ ! -s "$AUTH_KEYS" ]; then
+   echo ""
+   echo "   ⚠️  WARNING: No SSH keys found in $AUTH_KEYS"
+   echo "   ⚠️  Password auth is about to be DISABLED."
+   echo "   ⚠️  You will be LOCKED OUT if you don't have key access!"
+   echo ""
+   read -rp "   Continue anyway? [y/N]: " confirm
+   if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+      echo "   ⏭️  Skipped password auth change. Set up keys first:"
+      echo "      ssh-copy-id $(whoami)@<this-server>"
+      # re-enable password auth so user isn't locked out
+      sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+      if [ -d /etc/ssh/sshd_config.d ]; then
+         for conf in /etc/ssh/sshd_config.d/*.conf; do
+            [ -f "$conf" ] && sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' "$conf"
+         done
+      fi
+      echo "   🔑 PasswordAuthentication left as YES"
+   fi
+fi
+
+# ── Enable and start ──────────────────────────────────────
+echo ""
+echo "⚙️  Enabling and starting SSH service..."
+sudo systemctl enable ssh
+sudo systemctl restart ssh
+echo "✅ SSH service is running"
 
 echo ""
 
@@ -57,14 +93,8 @@ echo ""
 CHECKS_PASSED=0
 CHECKS_FAILED=0
 
-pass() {
-   echo "   ✅ $1"
-   ((CHECKS_PASSED++))
-}
-fail() {
-   echo "   ❌ $1"
-   ((CHECKS_FAILED++))
-}
+pass() { echo "   ✅ $1"; ((CHECKS_PASSED++)); }
+fail() { echo "   ❌ $1"; ((CHECKS_FAILED++)); }
 
 # 1. sshd binary exists
 echo "1️⃣  sshd binary"
@@ -76,10 +106,10 @@ fi
 
 # 2. Config syntax valid
 echo "2️⃣  Config syntax"
-if sshd -t 2>/dev/null; then
+if sudo sshd -t 2>/dev/null; then
    pass "sshd_config syntax is valid"
 else
-   fail "sshd_config has syntax errors — run 'sshd -t' to see details"
+   fail "sshd_config has syntax errors — run 'sudo sshd -t' to see details"
 fi
 
 # 3. Service active
@@ -120,7 +150,6 @@ echo "7️⃣  Connection test (localhost)"
 if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no localhost exit 2>/dev/null; then
    pass "localhost SSH connection successful"
 else
-   # BatchMode will fail if no key is set up — check if we at least got a response
    if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no localhost exit 2>&1 | grep -qi "permission denied"; then
       pass "sshd responds on localhost (auth required — expected)"
    else
@@ -130,13 +159,19 @@ fi
 
 # 8. Security settings applied
 echo "8️⃣  Security settings"
-if sshd -T 2>/dev/null | grep -qi "permitrootlogin no"; then
+if sudo sshd -T 2>/dev/null | grep -qi "permitrootlogin no"; then
    pass "PermitRootLogin is disabled"
 else
    fail "PermitRootLogin is NOT set to 'no'"
 fi
 
-if sshd -T 2>/dev/null | grep -qi "pubkeyauthentication yes"; then
+if sudo sshd -T 2>/dev/null | grep -qi "passwordauthentication no"; then
+   pass "PasswordAuthentication is disabled"
+else
+   fail "PasswordAuthentication is NOT disabled"
+fi
+
+if sudo sshd -T 2>/dev/null | grep -qi "pubkeyauthentication yes"; then
    pass "PubkeyAuthentication is enabled"
 else
    fail "PubkeyAuthentication is NOT enabled"
@@ -154,12 +189,12 @@ fi
 # 10. Firewall check (if ufw is installed)
 echo "🔟 Firewall"
 if command -v ufw &>/dev/null; then
-   if ufw status 2>/dev/null | grep -q "inactive"; then
+   if sudo ufw status 2>/dev/null | grep -q "inactive"; then
       pass "ufw is inactive (port 22 not blocked)"
-   elif ufw status 2>/dev/null | grep -q "22.*ALLOW"; then
+   elif sudo ufw status 2>/dev/null | grep -q "22.*ALLOW"; then
       pass "ufw allows port 22"
    else
-      fail "ufw is active but port 22 may not be allowed — run 'ufw allow ssh'"
+      fail "ufw is active but port 22 may not be allowed — run 'sudo ufw allow ssh'"
    fi
 else
    pass "ufw not installed (no firewall blocking)"
@@ -178,12 +213,15 @@ echo ""
 
 # ── Connection info ────────────────────────────────────────
 echo "🌐 Server IP addresses:"
-hostname -I | tr ' ' '\n' | while read ip; do
+hostname -I | tr ' ' '\n' | while read -r ip; do
    [ -n "$ip" ] && echo "   → $ip"
 done
 echo ""
 echo "🎉 Connect with:"
 echo "   ssh $(whoami)@<IP>"
 echo ""
-echo "💡 Tip: After copying your SSH key (ssh-copy-id user@IP),"
-echo "   disable password auth for better security."
+echo "⚠️  Password auth is DISABLED. Copy your key first:"
+echo "   ssh-copy-id $(whoami)@<IP>"
+echo ""
+echo "💡 Or manually:"
+echo "   cat ~/.ssh/id_ed25519.pub | ssh $(whoami)@<IP> 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'"

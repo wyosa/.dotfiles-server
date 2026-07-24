@@ -1,23 +1,36 @@
-alias ll="ls -la"
+# ── Listing ────────────────────────────────────────────────
+alias ll='ls -lah'
 alias la='ls -A'
 alias lf='ls -alF'
-alias ls='ls -CF'
-alias lt='ls --human-readable --size -1 -S --classify'
-alias lt='ls -t -1 -long'
+alias lt='ls -ltah'
 alias ld='ls -d */'
 
+# ── Navigation ─────────────────────────────────────────────
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+
+# ── System ─────────────────────────────────────────────────
 alias reboot='sudo reboot'
-alias delete='sudo rm -rf'
-
 alias update='sudo apt update && sudo apt upgrade -y'
-alias install='sudo apt install $1'
-alias uninstall='sudo apt uninstall $1'
+alias cleanup='sudo apt autoremove -y && sudo apt autoclean'
 
+install() { sudo apt install "$@"; }
+uninstall() { sudo apt remove "$@"; }
+search() { apt search "$@"; }
+
+# ── Docker ─────────────────────────────────────────────────
 alias docker='sudo docker'
 alias dc='sudo docker compose'
+alias dps='sudo docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}"'
+alias dimg='sudo docker images'
+alias dlog='sudo docker logs -f --tail 100'
 
-alias fh='find . -name '
-alias ..='cd ..'
-alias ....='cd ../..'
+# ── Find / Search ──────────────────────────────────────────
+fh() { find . -name "*$1*"; }
 
-alias al="echo ------------Your curent aliases are:------------¡';alias"
+# ── Misc ───────────────────────────────────────────────────
+alias ports='sudo ss -tlnp'
+alias myip='hostname -I'
+alias aliases='echo "── Aliases ──" && alias'
+alias path='echo -e ${PATH//:/\\n}'

@@ -4,6 +4,28 @@ set -e
 echo "🚀 Starting Docker & Docker Compose installation..."
 echo ""
 
+# ── OS Detection ───────────────────────────────────────────
+if [ -f /etc/os-release ]; then
+   . /etc/os-release
+   OS_ID="$ID"
+   OS_CODENAME="${VERSION_CODENAME:-unknown}"
+else
+   echo "❌ Cannot detect OS"
+   exit 1
+fi
+
+case "$OS_ID" in
+   ubuntu) DOCKER_REPO="https://download.docker.com/linux/ubuntu" ;;
+   debian) DOCKER_REPO="https://download.docker.com/linux/debian" ;;
+   *)
+      echo "❌ Unsupported OS: $OS_ID (only Ubuntu/Debian)"
+      exit 1
+      ;;
+esac
+
+echo "   OS: $OS_ID $VERSION_ID ($OS_CODENAME)"
+echo ""
+
 # ── Check if already installed and running ─────────────────
 if command -v docker &>/dev/null; then
    echo "📌 Docker is already installed"
@@ -38,7 +60,7 @@ else
    # ── Add Docker GPG key ─────────────────────────────────────
    echo "🔑 Adding Docker's official GPG key..."
    sudo install -m 0755 -d /etc/apt/keyrings
-   sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+   sudo curl -fsSL "$DOCKER_REPO/gpg" -o /etc/apt/keyrings/docker.asc
    sudo chmod a+r /etc/apt/keyrings/docker.asc
    echo "✅ GPG key added"
    echo ""
@@ -47,13 +69,13 @@ else
    echo "📋 Adding Docker apt repository..."
    sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
 Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+URIs: $DOCKER_REPO
+Suites: $OS_CODENAME
 Components: stable
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
    sudo apt update -qq
-   echo "✅ Repository added"
+   echo "✅ Repository added ($DOCKER_REPO)"
    echo ""
 
    # ── Install Docker Engine ──────────────────────────────────
@@ -86,14 +108,8 @@ echo ""
 CHECKS_PASSED=0
 CHECKS_FAILED=0
 
-pass() {
-   echo "   ✅ $1"
-   ((CHECKS_PASSED++))
-}
-fail() {
-   echo "   ❌ $1"
-   ((CHECKS_FAILED++))
-}
+pass() { echo "   ✅ $1"; ((CHECKS_PASSED++)); }
+fail() { echo "   ❌ $1"; ((CHECKS_FAILED++)); }
 
 # 1. Docker binary
 echo "1️⃣  Docker binary"
