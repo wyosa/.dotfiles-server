@@ -1,9 +1,9 @@
 ```
-    __      __  _____ __
-   / /___  / /_/ __(_) /__  _____      ________  ______   _____  _____
-  / __/ /_/ / /_/ /_/ / / _ \/ ___/_____/ ___/ _ \/ ___/ | / / _ \/ ___/
-_/ /_/ /_/ / __/ __/ / /  __(__  )_____(__  )  __/ /   | |/ /  __/ /
-\__,_/\__/_/ /_/ /_/_/\___/____/     /____/\___/_/    |___/\___/_/
+         __      __  _____ __ 
+    ____/ /___  / /_/ __(_) /__  _____      ________  ______   _____  _____
+   / __  / __ \/ __/ /_/ / / _ \/ ___/_____/ ___/ _ \/ ___/ | / / _ \/ ___/
+ _/ /_/ / /_/ / /_/ __/ / /  __(__  )_____(__  )  __/ /   | |/ /  __/ /
+(_)__,_/\____/\__/_/ /_/_/\___/____/     /____/\___/_/    |___/\___/_/
 ```
 
 Dotfiles & setup scripts for Ubuntu Server / Debian.
@@ -45,51 +45,3 @@ bash scripts/install.sh --all
 | `scripts/services/firewall.sh` | UFW: deny incoming, allow SSH |
 | `scripts/services/fail2ban.sh` | Fail2ban: 3 attempts → 24h ban on SSH |
 | `scripts/services/unattended-upgrades.sh` | Auto security updates (no auto-reboot) |
-
-## Usage
-
-```bash
-# interactive menu
-bash scripts/install.sh
-
-# full install (dotfiles + packages + system + security)
-bash scripts/install.sh --all
-
-# individual scripts
-bash scripts/packages.sh
-bash scripts/services/docker.sh
-```
-
-## Security defaults
-
-- SSH: password auth **disabled**, key-only
-- SSH: root login disabled, MaxAuthTries 3
-- UFW: deny all incoming, allow SSH
-- Fail2ban: 3 failed attempts → 24h ban
-- Unattended upgrades: security patches auto-installed
-
-> ⚠️ After running `sshd.sh`, copy your SSH key **before** logging out:
-> ```bash
-> ssh-copy-id user@server-ip
-> ```
-
-## Structure
-
-```
-dotfiles-server/
-├── .bashrc
-├── .bash_aliases
-├── .gitconfig
-├── .tmux.conf
-├── README.md
-└── scripts/
-    ├── install.sh
-    ├── packages.sh
-    ├── system.sh
-    └── services/
-        ├── docker.sh
-        ├── sshd.sh
-        ├── firewall.sh
-        ├── fail2ban.sh
-        └── unattended-upgrades.sh
-```
