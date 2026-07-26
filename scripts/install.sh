@@ -4,32 +4,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
+. "$SCRIPT_DIR/lib/common.sh"
+
 DOTFILES=(.bashrc .bash_aliases .gitconfig .tmux.conf)
 
-# ── Colors ─────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
-
-info()  { echo -e "${CYAN}ℹ️  $1${NC}"; }
-ok()    { echo -e "${GREEN}✅ $1${NC}"; }
-warn()  { echo -e "${YELLOW}⚠️  $1${NC}"; }
-err()   { echo -e "${RED}❌ $1${NC}"; }
-
 # ── OS Detection ───────────────────────────────────────────
-detect_os() {
-   if [ -f /etc/os-release ]; then
-      . /etc/os-release
-      OS_ID="$ID"
-      OS_VERSION="$VERSION_ID"
-      OS_CODENAME="${VERSION_CODENAME:-unknown}"
-   else
-      err "Cannot detect OS — /etc/os-release not found"
-      exit 1
-   fi
+detect_os_supported() {
+   detect_os
 
    case "$OS_ID" in
       ubuntu|debian) ;;
@@ -88,7 +69,7 @@ show_menu() {
    echo "  7) 🚫 Fail2ban"
    echo "  8) 🔄 Unattended upgrades"
    echo "  9) 🛡️  Security bundle (5 + 6 + 7 + 8)"
-   echo "  a) 🚀 Full install (1 + 2 + 3 + 9)"
+   echo "  a) 🚀 Full install (1 + 2 + 3 + 4 + 9)"
    echo "  q) Quit"
    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
    echo ""
@@ -105,12 +86,13 @@ run_script() {
 }
 
 # ── Main ───────────────────────────────────────────────────
-detect_os
+detect_os_supported
 
 if [ "${1:-}" = "--all" ]; then
    link_dotfiles
    run_script "packages.sh"
    run_script "system.sh"
+   run_script "services/docker.sh"
    run_script "services/sshd.sh"
    run_script "services/firewall.sh"
    run_script "services/fail2ban.sh"
@@ -142,6 +124,7 @@ while true; do
          link_dotfiles
          run_script "packages.sh"
          run_script "system.sh"
+         run_script "services/docker.sh"
          run_script "services/sshd.sh"
          run_script "services/firewall.sh"
          run_script "services/fail2ban.sh"

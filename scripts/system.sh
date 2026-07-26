@@ -53,9 +53,11 @@ read -rp "   New hostname (Enter to keep): " NEW_HOST
 
 if [ -n "$NEW_HOST" ] && [ "$NEW_HOST" != "$CURRENT_HOST" ]; then
    sudo hostnamectl set-hostname "$NEW_HOST"
-   # update /etc/hosts
-   if grep -q "$CURRENT_HOST" /etc/hosts; then
-      sudo sed -i "s/$CURRENT_HOST/$NEW_HOST/g" /etc/hosts
+   # update /etc/hosts — replace the 127.0.1.1 entry (no regex on hostname)
+   if grep -qE '^127\.0\.1\.1[[:space:]]' /etc/hosts; then
+      sudo sed -i -E "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1\t$NEW_HOST/" /etc/hosts
+   else
+      echo "127.0.1.1 $NEW_HOST" | sudo tee -a /etc/hosts >/dev/null
    fi
    echo "   ✅ Hostname set to $NEW_HOST"
 else
@@ -78,12 +80,15 @@ if [ "$CURRENT_SWAP" -gt 0 ]; then
       SWAP_SIZE=""
    else
       sudo swapoff -a
-      SWAP_SIZE="${TOTAL_RAM_MB}M"
+      # disable old swap entries in fstab so stale ones don't break boot
+      sudo sed -i -E '/^[[:space:]]*[^#[:space:]]+[[:space:]]+none[[:space:]]+swap[[:space:]]/s/^/# /' /etc/fstab
+      SWAP_SIZE="$((TOTAL_RAM_MB < 4096 ? TOTAL_RAM_MB : 4096))M"
    fi
 else
+   SUGGESTED_SWAP=$((TOTAL_RAM_MB < 4096 ? TOTAL_RAM_MB : 4096))
    echo "   No swap configured (RAM: ${TOTAL_RAM_MB}M)"
-   echo "   Recommended: RAM × 1–2"
-   read -rp "   Swap size in MB (Enter to skip, e.g. 2048): " SWAP_SIZE
+   echo "   Recommended: ${SUGGESTED_SWAP}M (min(RAM, 4G) is usually enough for servers)"
+   read -rp "   Swap size in MB (Enter to skip, e.g. $SUGGESTED_SWAP): " SWAP_SIZE
 fi
 
 if [ -n "$SWAP_SIZE" ]; then
@@ -98,7 +103,7 @@ if [ -n "$SWAP_SIZE" ]; then
    sudo swapon "$SWAP_FILE"
 
    # persist across reboots
-   if ! grep -q "$SWAP_FILE" /etc/fstab; then
+   if ! grep -qE "^${SWAP_FILE}[[:space:]]" /etc/fstab; then
       echo "$SWAP_FILE none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
    fi
 

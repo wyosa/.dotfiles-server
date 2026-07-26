@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../lib/common.sh"
+
 echo "🚫 Starting Fail2ban setup..."
 echo ""
 
@@ -31,7 +34,6 @@ backend  = systemd
 enabled  = true
 port     = ssh
 filter   = sshd
-logpath  = /var/log/auth.log
 maxretry = 3
 bantime  = 24h
 EOF
@@ -53,12 +55,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🔍 Running verification checks..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-
-CHECKS_PASSED=0
-CHECKS_FAILED=0
-
-pass() { echo "   ✅ $1"; ((CHECKS_PASSED++)); }
-fail() { echo "   ❌ $1"; ((CHECKS_FAILED++)); }
 
 # 1. Binary exists
 echo "1️⃣  Fail2ban binary"
@@ -102,14 +98,7 @@ else
 fi
 
 # ── Summary ────────────────────────────────────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ "$CHECKS_FAILED" -eq 0 ]; then
-   echo "🎉 All $CHECKS_PASSED checks passed!"
-else
-   echo "⚠️  $CHECKS_PASSED passed, $CHECKS_FAILED failed"
-fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+check_summary
 echo ""
 echo "💡 Useful commands:"
 echo "   sudo fail2ban-client status sshd   — jail status"

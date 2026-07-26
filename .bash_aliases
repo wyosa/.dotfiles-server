@@ -20,17 +20,25 @@ uninstall() { sudo apt remove "$@"; }
 search() { apt search "$@"; }
 
 # ── Docker ─────────────────────────────────────────────────
-alias docker='sudo docker'
-alias dc='sudo docker compose'
-alias dps='sudo docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}"'
-alias dimg='sudo docker images'
-alias dlog='sudo docker logs -f --tail 100'
+# no sudo here — docker.sh adds your user to the docker group
+alias dc='docker compose'
+alias dps='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}"'
+alias dimg='docker images'
+alias dlog='docker logs -f --tail 100'
+
+# ── systemd ────────────────────────────────────────────────
+alias sctl='sudo systemctl'
+alias jctl='sudo journalctl'
 
 # ── Find / Search ──────────────────────────────────────────
 fh() { find . -name "*$1*"; }
 
 # ── Misc ───────────────────────────────────────────────────
+alias df='df -h'
+alias du='du -h'
+alias free='free -h'
 alias ports='sudo ss -tlnp'
 alias myip='hostname -I'
+alias myipext='curl -s ifconfig.me && echo'
 alias aliases='echo "── Aliases ──" && alias'
 alias path='echo -e ${PATH//:/\\n}'

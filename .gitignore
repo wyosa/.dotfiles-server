@@ -1,2 +1,5 @@
 # MacOS trash
 .DS_Store
+
+# backups created by install.sh when relinking dotfiles
+*.backup.*

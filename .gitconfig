@@ -23,5 +23,14 @@
 [push]
 	autoSetupRemote = true
 
+[fetch]
+	prune = true
+
+[merge]
+	conflictstyle = zdiff3
+
+[rerere]
+	enabled = true
+
 [color]
 	ui = auto

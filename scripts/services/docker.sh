@@ -1,18 +1,14 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../lib/common.sh"
+
 echo "🚀 Starting Docker & Docker Compose installation..."
 echo ""
 
 # ── OS Detection ───────────────────────────────────────────
-if [ -f /etc/os-release ]; then
-   . /etc/os-release
-   OS_ID="$ID"
-   OS_CODENAME="${VERSION_CODENAME:-unknown}"
-else
-   echo "❌ Cannot detect OS"
-   exit 1
-fi
+detect_os
 
 case "$OS_ID" in
    ubuntu) DOCKER_REPO="https://download.docker.com/linux/ubuntu" ;;
@@ -105,27 +101,20 @@ echo "🔍 Running verification checks..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-CHECKS_PASSED=0
-CHECKS_FAILED=0
-
-pass() { echo "   ✅ $1"; ((CHECKS_PASSED++)); }
-fail() { echo "   ❌ $1"; ((CHECKS_FAILED++)); }
-
-# 1. Docker binary
+# 1. Docker binary + version
 echo "1️⃣  Docker binary"
 if command -v docker &>/dev/null; then
-   pass "docker found at $(command -v docker)"
+   pass "$(docker --version)"
 else
    fail "docker binary not found"
 fi
 
-# 2. Docker version
-echo "2️⃣  Docker version"
-DOCKER_VER=$(docker --version 2>/dev/null || true)
-if [ -n "$DOCKER_VER" ]; then
-   pass "$DOCKER_VER"
+# 2. Docker daemon active and enabled
+echo "2️⃣  Docker service"
+if systemctl is-active --quiet docker && systemctl is-enabled --quiet docker; then
+   pass "docker.service is active and enabled on boot"
 else
-   fail "could not determine Docker version"
+   fail "docker.service is NOT active/enabled"
 fi
 
 # 3. Docker Compose plugin
@@ -137,58 +126,8 @@ else
    fail "Docker Compose plugin not found"
 fi
 
-# 4. Docker Buildx plugin
-echo "4️⃣  Docker Buildx plugin"
-if docker buildx version &>/dev/null; then
-   pass "$(docker buildx version 2>/dev/null)"
-else
-   fail "Docker Buildx plugin not found"
-fi
-
-# 5. Docker daemon active
-echo "5️⃣  Docker service"
-if systemctl is-active --quiet docker; then
-   pass "docker.service is active"
-else
-   fail "docker.service is NOT active"
-fi
-
-# 6. Docker enabled on boot
-echo "6️⃣  Autostart on boot"
-if systemctl is-enabled --quiet docker; then
-   pass "docker.service is enabled (will start on boot)"
-else
-   fail "docker.service is NOT enabled for autostart"
-fi
-
-# 7. containerd running
-echo "7️⃣  containerd"
-if systemctl is-active --quiet containerd; then
-   pass "containerd.service is active"
-else
-   fail "containerd.service is NOT active"
-fi
-
-# 8. Docker socket
-echo "8️⃣  Docker socket"
-if [ -S /var/run/docker.sock ]; then
-   pass "/var/run/docker.sock exists"
-else
-   fail "/var/run/docker.sock not found"
-fi
-
-# 9. Docker info (daemon responds)
-echo "9️⃣  Daemon responsiveness"
-if sudo docker info &>/dev/null; then
-   CONTAINERS=$(sudo docker info --format '{{.Containers}}' 2>/dev/null || echo "?")
-   IMAGES=$(sudo docker info --format '{{.Images}}' 2>/dev/null || echo "?")
-   pass "daemon responds ($CONTAINERS containers, $IMAGES images)"
-else
-   fail "daemon not responding to 'docker info'"
-fi
-
-# 10. hello-world test
-echo "🔟 Container run test"
+# 4. Container run test
+echo "4️⃣  Container run test"
 if sudo docker run --rm hello-world &>/dev/null; then
    pass "hello-world container ran successfully"
    sudo docker rmi hello-world &>/dev/null || true
@@ -196,51 +135,8 @@ else
    fail "hello-world container failed to run"
 fi
 
-# 11. User in docker group
-echo "1️⃣1️⃣ Docker group membership"
-CURRENT_USER=$(whoami)
-if id -nG "$CURRENT_USER" | grep -qw docker; then
-   pass "'$CURRENT_USER' is in the docker group"
-else
-   fail "'$CURRENT_USER' is NOT in the docker group yet (re-login required)"
-fi
-
-# 12. Network drivers
-echo "1️⃣2️⃣ Network drivers"
-NET_DRIVERS=$(sudo docker network ls --format '{{.Driver}}' 2>/dev/null | sort -u | tr '\n' ', ' | sed 's/,$//')
-if [ -n "$NET_DRIVERS" ]; then
-   pass "available drivers: $NET_DRIVERS"
-else
-   fail "no network drivers found"
-fi
-
-# 13. Storage driver
-echo "1️⃣3️⃣ Storage driver"
-STORAGE=$(sudo docker info --format '{{.Driver}}' 2>/dev/null || true)
-if [ -n "$STORAGE" ]; then
-   pass "storage driver: $STORAGE"
-else
-   fail "could not determine storage driver"
-fi
-
-# 14. Disk space for /var/lib/docker
-echo "1️⃣4️⃣ Disk space"
-AVAIL=$(df -h /var/lib/docker 2>/dev/null | awk 'NR==2 {print $4}' || true)
-if [ -n "$AVAIL" ]; then
-   pass "$AVAIL available on /var/lib/docker partition"
-else
-   fail "could not check disk space"
-fi
-
 # ── Summary ────────────────────────────────────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ "$CHECKS_FAILED" -eq 0 ]; then
-   echo "🎉 All $CHECKS_PASSED checks passed!"
-else
-   echo "⚠️  $CHECKS_PASSED passed, $CHECKS_FAILED failed"
-fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+check_summary
 echo ""
 
 # ── Post-install notes ─────────────────────────────────────

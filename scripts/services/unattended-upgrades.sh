@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../lib/common.sh"
+
 echo "🔄 Starting unattended-upgrades setup..."
 echo ""
 
@@ -18,14 +21,6 @@ echo ""
 # ── Configure ──────────────────────────────────────────────
 echo "🔧 Configuring auto-updates..."
 
-# detect OS for correct origin
-. /etc/os-release
-case "$ID" in
-   ubuntu) ORIGIN="Ubuntu" ;;
-   debian) ORIGIN="Debian" ;;
-   *)      ORIGIN="Debian" ;;
-esac
-
 AUTOUPGRADE_FILE="/etc/apt/apt.conf.d/20auto-upgrades"
 sudo tee "$AUTOUPGRADE_FILE" >/dev/null <<EOF
 APT::Periodic::Update-Package-Lists "1";
@@ -34,28 +29,17 @@ APT::Periodic::AutocleanInterval "7";
 APT::Periodic::Download-Upgradeable-Packages "1";
 EOF
 
+# NB: we deliberately do NOT rewrite /etc/apt/apt.conf.d/50unattended-upgrades.
+# The package's default template already has the correct per-OS origins
+# (Debian security needs label=Debian-Security, which a hand-written
+# "${ORIGIN}:${codename}-security" entry silently fails to match).
+
 UNATTENDED_FILE="/etc/apt/apt.conf.d/50unattended-upgrades"
-if [ -f "$UNATTENDED_FILE" ]; then
-   sudo cp "$UNATTENDED_FILE" "${UNATTENDED_FILE}.bak"
-fi
-
-sudo tee "$UNATTENDED_FILE" >/dev/null <<EOF
-Unattended-Upgrade::Allowed-Origins {
-    "${ORIGIN}:${VERSION_CODENAME}-security";
-    "${ORIGIN}:${VERSION_CODENAME}-updates";
-};
-
-Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
-Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
-Unattended-Upgrade::AutoFixInterruptedDpkg "true";
-Unattended-Upgrade::MinimalSteps "true";
-Unattended-Upgrade::Automatic-Reboot "false";
-EOF
 
 echo "   📄 Auto-upgrade config: $AUTOUPGRADE_FILE"
-echo "   📄 Unattended config:   $UNATTENDED_FILE"
-echo "   🔒 Security + updates: auto"
-echo "   🔒 Reboot: manual (Automatic-Reboot = false)"
+echo "   📄 Origins config:    $UNATTENDED_FILE (package default, untouched)"
+echo "   🔒 Security updates: auto"
+echo "   🔒 Reboot: manual (Automatic-Reboot = false by default)"
 echo ""
 
 # ── Enable ─────────────────────────────────────────────────
@@ -71,12 +55,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🔍 Running verification checks..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-
-CHECKS_PASSED=0
-CHECKS_FAILED=0
-
-pass() { echo "   ✅ $1"; ((CHECKS_PASSED++)); }
-fail() { echo "   ❌ $1"; ((CHECKS_FAILED++)); }
 
 # 1. Package installed
 echo "1️⃣  Package"
@@ -94,12 +72,12 @@ else
    fail "periodic config missing or disabled"
 fi
 
-# 3. Allowed origins
+# 3. Allowed origins (from the package's default config)
 echo "3️⃣  Allowed origins"
 if [ -f "$UNATTENDED_FILE" ] && grep -q "security" "$UNATTENDED_FILE"; then
-   pass "security updates allowed"
+   pass "security updates allowed (package default origins)"
 else
-   fail "security origin not configured"
+   fail "security origin not found in $UNATTENDED_FILE"
 fi
 
 # 4. Dry run
@@ -119,14 +97,7 @@ else
 fi
 
 # ── Summary ────────────────────────────────────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ "$CHECKS_FAILED" -eq 0 ]; then
-   echo "🎉 All $CHECKS_PASSED checks passed!"
-else
-   echo "⚠️  $CHECKS_PASSED passed, $CHECKS_FAILED failed"
-fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+check_summary
 echo ""
 echo "💡 Check logs:"
 echo "   cat /var/log/unattended-upgrades/unattended-upgrades.log"

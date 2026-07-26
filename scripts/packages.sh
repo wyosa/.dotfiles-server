@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
+
 echo "📦 Installing base packages..."
 echo ""
 
@@ -51,12 +54,6 @@ echo "🔍 Verification..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-CHECKS_PASSED=0
-CHECKS_FAILED=0
-
-pass() { echo "   ✅ $1"; ((CHECKS_PASSED++)); }
-fail() { echo "   ❌ $1"; ((CHECKS_FAILED++)); }
-
 for pkg in "${PACKAGES[@]}"; do
    if dpkg -s "$pkg" &>/dev/null; then
       pass "$pkg"
@@ -65,11 +62,4 @@ for pkg in "${PACKAGES[@]}"; do
    fi
 done
 
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ "$CHECKS_FAILED" -eq 0 ]; then
-   echo "🎉 All $CHECKS_PASSED packages installed!"
-else
-   echo "⚠️  $CHECKS_PASSED installed, $CHECKS_FAILED failed"
-fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+check_summary

@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../lib/common.sh"
+
 echo "🧱 Starting UFW firewall setup..."
 echo ""
 
@@ -24,8 +27,9 @@ sudo ufw default allow outgoing
 echo "   🔒 Default: deny incoming, allow outgoing"
 
 # SSH (critical — do this BEFORE enabling)
-sudo ufw allow ssh
-echo "   🔑 SSH (port 22) allowed"
+# limit = allow + rate-limit (6 connections per 30s) — basic brute-force protection
+sudo ufw limit ssh
+echo "   🔑 SSH (port 22) allowed with rate-limit"
 
 # common services (optional, uncomment as needed)
 # sudo ufw allow http
@@ -51,12 +55,6 @@ echo "🔍 Running verification checks..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-CHECKS_PASSED=0
-CHECKS_FAILED=0
-
-pass() { echo "   ✅ $1"; ((CHECKS_PASSED++)); }
-fail() { echo "   ❌ $1"; ((CHECKS_FAILED++)); }
-
 # 1. UFW installed
 echo "1️⃣  UFW binary"
 if command -v ufw &>/dev/null; then
@@ -81,10 +79,10 @@ else
    fail "default incoming policy is not deny"
 fi
 
-# 4. SSH allowed
+# 4. SSH allowed (ALLOW or LIMIT)
 echo "4️⃣  SSH rule"
-if sudo ufw status | grep -qE "22|ssh.*ALLOW"; then
-   pass "SSH is allowed"
+if sudo ufw status | grep -qE "(22|ssh).*(ALLOW|LIMIT)"; then
+   pass "SSH is allowed (rate-limited)"
 else
    fail "SSH rule not found — you may be locked out!"
 fi
@@ -98,14 +96,7 @@ else
 fi
 
 # ── Summary ────────────────────────────────────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ "$CHECKS_FAILED" -eq 0 ]; then
-   echo "🎉 All $CHECKS_PASSED checks passed!"
-else
-   echo "⚠️  $CHECKS_PASSED passed, $CHECKS_FAILED failed"
-fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+check_summary
 echo ""
 
 # ── Current rules ──────────────────────────────────────────

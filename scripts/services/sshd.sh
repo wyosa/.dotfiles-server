@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../lib/common.sh"
+
 echo "🚀 Starting SSH server setup..."
 echo ""
 
@@ -36,65 +39,45 @@ echo "🔧 Applying security settings..."
 if [ -d /etc/ssh/sshd_config.d ]; then
    for conf in /etc/ssh/sshd_config.d/*.conf; do
       [ -f "$conf" ] || continue
-      sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' "$conf"
+      sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$conf"
+      sudo sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication no/' "$conf"
       sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' "$conf"
    done
 fi
 
 sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication no/' /etc/ssh/sshd_config
 sudo sed -i 's/^#\?MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
 sudo sed -i 's/^#\?X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config
 echo "   🔒 Root login disabled"
-echo "   🔑 Password authentication disabled (key-only)"
-echo "   🔑 Public key authentication enabled"
+echo "   🔑 Password authentication enabled"
+echo "   🔒 Public key authentication disabled"
 echo "   🔒 MaxAuthTries = 3"
 echo "   🔒 X11Forwarding disabled"
 
-# ── SSH key check ─────────────────────────────────────────
-AUTH_KEYS="$HOME/.ssh/authorized_keys"
-if [ ! -f "$AUTH_KEYS" ] || [ ! -s "$AUTH_KEYS" ]; then
-   echo ""
-   echo "   ⚠️  WARNING: No SSH keys found in $AUTH_KEYS"
-   echo "   ⚠️  Password auth is about to be DISABLED."
-   echo "   ⚠️  You will be LOCKED OUT if you don't have key access!"
-   echo ""
-   read -rp "   Continue anyway? [y/N]: " confirm
-   if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-      echo "   ⏭️  Skipped password auth change. Set up keys first:"
-      echo "      ssh-copy-id $(whoami)@<this-server>"
-      # re-enable password auth so user isn't locked out
-      sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-      if [ -d /etc/ssh/sshd_config.d ]; then
-         for conf in /etc/ssh/sshd_config.d/*.conf; do
-            [ -f "$conf" ] && sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' "$conf"
-         done
-      fi
-      echo "   🔑 PasswordAuthentication left as YES"
-   fi
-fi
-
 # ── Enable and start ──────────────────────────────────────
 echo ""
-echo "⚙️  Enabling and starting SSH service..."
+echo "⚙️  Validating config and restarting SSH service..."
+if ! sudo sshd -t; then
+   err "sshd_config has syntax errors — NOT restarting. Fix the config first."
+   exit 1
+fi
 sudo systemctl enable ssh
-sudo systemctl restart ssh
+sudo systemctl reload ssh 2>/dev/null || sudo systemctl restart ssh
 echo "✅ SSH service is running"
 
 echo ""
+
+# effective port (respects a custom Port directive)
+SSH_PORT=$(sudo sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
+SSH_PORT="${SSH_PORT:-22}"
 
 # ── Verification ───────────────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🔍 Running verification checks..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-
-CHECKS_PASSED=0
-CHECKS_FAILED=0
-
-pass() { echo "   ✅ $1"; ((CHECKS_PASSED++)); }
-fail() { echo "   ❌ $1"; ((CHECKS_FAILED++)); }
 
 # 1. sshd binary exists
 echo "1️⃣  sshd binary"
@@ -128,12 +111,12 @@ else
    fail "ssh.service is NOT enabled for autostart"
 fi
 
-# 5. Port 22 is listening
+# 5. SSH port is listening
 echo "5️⃣  Port listening"
-if ss -tlnp | grep -q ':22\b'; then
-   pass "sshd is listening on port 22"
+if ss -tlnp | grep -q ":${SSH_PORT}\b"; then
+   pass "sshd is listening on port $SSH_PORT"
 else
-   fail "nothing is listening on port 22"
+   fail "nothing is listening on port $SSH_PORT"
 fi
 
 # 6. sshd process running
@@ -147,10 +130,10 @@ fi
 
 # 7. Loopback connection test
 echo "7️⃣  Connection test (localhost)"
-if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no localhost exit 2>/dev/null; then
+if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -p "$SSH_PORT" localhost exit 2>/dev/null; then
    pass "localhost SSH connection successful"
 else
-   if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no localhost exit 2>&1 | grep -qi "permission denied"; then
+   if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -p "$SSH_PORT" localhost exit 2>&1 | grep -qi "permission denied"; then
       pass "sshd responds on localhost (auth required — expected)"
    else
       fail "could not connect to sshd on localhost"
@@ -165,16 +148,16 @@ else
    fail "PermitRootLogin is NOT set to 'no'"
 fi
 
-if sudo sshd -T 2>/dev/null | grep -qi "passwordauthentication no"; then
-   pass "PasswordAuthentication is disabled"
+if sudo sshd -T 2>/dev/null | grep -qi "passwordauthentication yes"; then
+   pass "PasswordAuthentication is enabled"
 else
-   fail "PasswordAuthentication is NOT disabled"
+   fail "PasswordAuthentication is NOT enabled"
 fi
 
-if sudo sshd -T 2>/dev/null | grep -qi "pubkeyauthentication yes"; then
-   pass "PubkeyAuthentication is enabled"
+if sudo sshd -T 2>/dev/null | grep -qi "pubkeyauthentication no"; then
+   pass "PubkeyAuthentication is disabled"
 else
-   fail "PubkeyAuthentication is NOT enabled"
+   fail "PubkeyAuthentication is NOT disabled"
 fi
 
 # 9. Host keys exist
@@ -190,25 +173,18 @@ fi
 echo "🔟 Firewall"
 if command -v ufw &>/dev/null; then
    if sudo ufw status 2>/dev/null | grep -q "inactive"; then
-      pass "ufw is inactive (port 22 not blocked)"
-   elif sudo ufw status 2>/dev/null | grep -q "22.*ALLOW"; then
-      pass "ufw allows port 22"
+      pass "ufw is inactive (port $SSH_PORT not blocked)"
+   elif sudo ufw status 2>/dev/null | grep -qE "${SSH_PORT}(/tcp)?[[:space:]]+(ALLOW|LIMIT)"; then
+      pass "ufw allows port $SSH_PORT"
    else
-      fail "ufw is active but port 22 may not be allowed — run 'sudo ufw allow ssh'"
+      fail "ufw is active but port $SSH_PORT may not be allowed — run 'sudo ufw limit ssh'"
    fi
 else
    pass "ufw not installed (no firewall blocking)"
 fi
 
 # ── Summary ────────────────────────────────────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ "$CHECKS_FAILED" -eq 0 ]; then
-   echo "🎉 All $CHECKS_PASSED checks passed!"
-else
-   echo "⚠️  $CHECKS_PASSED passed, $CHECKS_FAILED failed"
-fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+check_summary
 echo ""
 
 # ── Connection info ────────────────────────────────────────
@@ -217,11 +193,9 @@ hostname -I | tr ' ' '\n' | while read -r ip; do
    [ -n "$ip" ] && echo "   → $ip"
 done
 echo ""
+PORT_FLAG=""
+[ "$SSH_PORT" != "22" ] && PORT_FLAG=" -p $SSH_PORT"
 echo "🎉 Connect with:"
-echo "   ssh $(whoami)@<IP>"
+echo "   ssh$PORT_FLAG $(whoami)@<IP>"
 echo ""
-echo "⚠️  Password auth is DISABLED. Copy your key first:"
-echo "   ssh-copy-id $(whoami)@<IP>"
-echo ""
-echo "💡 Or manually:"
-echo "   cat ~/.ssh/id_ed25519.pub | ssh $(whoami)@<IP> 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'"
+echo "🔑 Password auth only (public key auth is disabled)."
