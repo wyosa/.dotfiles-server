@@ -8,21 +8,13 @@
 
 Dotfiles & setup scripts for Ubuntu Server / Debian.
 
-## Quick start
+### Quick start
 
 ```bash
 git clone https://github.com/tokyo/dotfiles-server.git ~/dotfiles-server
 cd ~/dotfiles-server
 bash scripts/install.sh
 ```
-
-Or one-shot full install:
-
-```bash
-bash scripts/install.sh --all
-```
-
-## What's inside
 
 ### Scripts
 
@@ -38,13 +30,10 @@ bash scripts/install.sh --all
 | `scripts/services/unattended-upgrades.sh` | Auto security updates (no auto-reboot) |
 | `scripts/lib/common.sh` | Shared helpers: colors, check counters, OS detection |
 
-## Security defaults
+### Security defaults
 
 - SSH: password auth (public key auth disabled)
 - SSH: root login disabled, MaxAuthTries 3
 - UFW: deny all incoming, allow SSH with rate-limit
 - Fail2ban: 3 failed attempts → 24h ban
 - Unattended upgrades: security patches auto-installed
-
-> ⚠️ Password-only auth means brute-force protection (UFW rate-limit
-> + Fail2ban) is doing real work — keep both active and use a strong password.
