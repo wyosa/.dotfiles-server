@@ -82,6 +82,7 @@ run_script() {
       bash "$script"
    else
       err "Script not found: $script"
+      return 1
    fi
 }
 

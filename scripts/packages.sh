@@ -46,6 +46,17 @@ echo ""
 echo "📥 Installing ${#PACKAGES[@]} packages..."
 sudo apt install -y -qq "${PACKAGES[@]}"
 
+# Task is distributed through its official APT repository.
+if ! command -v task >/dev/null; then
+   TASK_SETUP=$(mktemp)
+   trap 'rm -f "$TASK_SETUP"' EXIT
+   curl -fsSL https://dl.cloudsmith.io/public/task/task/setup.deb.sh -o "$TASK_SETUP"
+   sudo bash "$TASK_SETUP"
+   sudo apt install -y -qq task
+   rm -f "$TASK_SETUP"
+   trap - EXIT
+fi
+
 echo ""
 
 # ── Verification ───────────────────────────────────────────
@@ -61,5 +72,11 @@ for pkg in "${PACKAGES[@]}"; do
       fail "$pkg NOT installed"
    fi
 done
+
+if task --version >/dev/null 2>&1 && task --help 2>&1 | grep -q 'Taskfile'; then
+   pass "$(task --version)"
+else
+   fail "Go Task is missing or another program is installed as task"
+fi
 
 check_summary

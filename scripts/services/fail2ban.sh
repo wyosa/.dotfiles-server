@@ -21,20 +21,20 @@ echo ""
 # ── Configure ──────────────────────────────────────────────
 echo "🔧 Configuring jails..."
 
-JAIL_FILE="/etc/fail2ban/jail.local"
+SSH_PORTS=$(ssh_ports)
+[ -n "$SSH_PORTS" ] || { err "Cannot determine SSH ports"; exit 1; }
+SSH_PORTS=$(printf '%s\n' "$SSH_PORTS" | paste -sd, -)
+JAIL_FILE="/etc/fail2ban/jail.d/99-dotfiles-server.local"
+sudo install -d -m 755 /etc/fail2ban/jail.d
 
-sudo tee "$JAIL_FILE" >/dev/null <<'EOF'
-[DEFAULT]
-bantime  = 1h
+sudo tee "$JAIL_FILE" >/dev/null <<EOF
+[sshd]
+enabled  = true
+port     = $SSH_PORTS
+filter   = sshd
 findtime = 10m
 maxretry = 3
 backend  = systemd
-
-[sshd]
-enabled  = true
-port     = ssh
-filter   = sshd
-maxretry = 3
 bantime  = 24h
 EOF
 
@@ -44,6 +44,7 @@ echo ""
 
 # ── Enable and start ──────────────────────────────────────
 echo "⚙️  Enabling and starting Fail2ban..."
+sudo fail2ban-client -t
 sudo systemctl enable fail2ban
 sudo systemctl restart fail2ban
 echo "✅ Fail2ban is running"

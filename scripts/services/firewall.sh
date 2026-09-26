@@ -21,15 +21,21 @@ echo ""
 # ── Configure rules ────────────────────────────────────────
 echo "🔧 Configuring rules..."
 
+# Abort before changing policy if the SSH configuration cannot be read.
+SSH_PORTS=$(ssh_ports)
+[ -n "$SSH_PORTS" ] || { err "Cannot determine SSH ports"; exit 1; }
+
+# Allow configured ports and the active session before enabling the firewall.
+for port in $SSH_PORTS; do
+   sudo ufw limit "$port/tcp"
+done
+
 # default policies
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 echo "   🔒 Default: deny incoming, allow outgoing"
 
-# SSH (critical — do this BEFORE enabling)
-# limit = allow + rate-limit (6 connections per 30s) — basic brute-force protection
-sudo ufw limit ssh
-echo "   🔑 SSH (port 22) allowed with rate-limit"
+echo "   🔑 SSH ports allowed with rate-limit: $(printf '%s\n' "$SSH_PORTS" | paste -sd, -)"
 
 # common services (optional, uncomment as needed)
 # sudo ufw allow http
@@ -81,11 +87,13 @@ fi
 
 # 4. SSH allowed (ALLOW or LIMIT)
 echo "4️⃣  SSH rule"
-if sudo ufw status | grep -qE "(22|ssh).*(ALLOW|LIMIT)"; then
-   pass "SSH is allowed (rate-limited)"
-else
-   fail "SSH rule not found — you may be locked out!"
-fi
+for port in $SSH_PORTS; do
+   if sudo ufw status | grep -qE "^${port}/tcp[[:space:]].*(ALLOW|LIMIT)"; then
+      pass "SSH port $port is allowed"
+   else
+      fail "SSH rule for port $port not found"
+   fi
+done
 
 # 5. Enabled on boot
 echo "5️⃣  Autostart on boot"
@@ -102,6 +110,7 @@ echo ""
 # ── Current rules ──────────────────────────────────────────
 echo "📋 Current rules:"
 sudo ufw status numbered
+echo "Docker-published ports are controlled by Compose bindings, not UFW INPUT rules."
 echo ""
 echo "💡 Add more rules:"
 echo "   sudo ufw allow http"

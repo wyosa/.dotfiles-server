@@ -4,198 +4,78 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/../lib/common.sh"
 
-echo "🚀 Starting SSH server setup..."
-echo ""
+info "Configuring SSH without changing password or root login policy..."
+if [ ! -x /usr/sbin/sshd ]; then
+   sudo apt update -qq
+   sudo apt install -y -qq openssh-server
+fi
 
-# ── Check if already installed and running ─────────────────
-if command -v sshd &>/dev/null; then
-   echo "📌 openssh-server is already installed"
-   if systemctl is-active --quiet ssh; then
-      echo "✅ SSH service is already running"
-   else
-      echo "⚠️  SSH is installed but not running, starting..."
-      sudo systemctl enable ssh
-      sudo systemctl start ssh
-      echo "✅ SSH service started"
+MAIN_CONFIG=/etc/ssh/sshd_config
+MANAGED_CONFIG=/etc/ssh/sshd_config.d/00-dotfiles-server.conf
+BACKUP_DIR=$(sudo mktemp -d /etc/ssh/dotfiles-backup.XXXXXX)
+TEMP_CONFIG=$(mktemp)
+sudo cp -p "$MAIN_CONFIG" "$BACKUP_DIR/sshd_config"
+if sudo test -f "$MANAGED_CONFIG"; then
+   sudo cp -p "$MANAGED_CONFIG" "$BACKUP_DIR/managed.conf"
+fi
+
+# Restore both files if validation or reload fails.
+rollback() {
+   local status=$?
+   rm -f "$TEMP_CONFIG"
+   if [ "$status" -ne 0 ]; then
+      sudo cp -p "$BACKUP_DIR/sshd_config" "$MAIN_CONFIG"
+      if sudo test -f "$BACKUP_DIR/managed.conf"; then
+         sudo cp -p "$BACKUP_DIR/managed.conf" "$MANAGED_CONFIG"
+      else
+         sudo rm -f "$MANAGED_CONFIG"
+      fi
+      err "SSH configuration restored from $BACKUP_DIR"
    fi
-else
-   # ── Install ────────────────────────────────────────────────
-   echo "📦 Installing openssh-server..."
-   sudo apt update -qq && sudo apt install -y -qq openssh-server
-   echo "✅ openssh-server installed"
-   echo ""
+}
+trap rollback EXIT
 
-   # ── Backup config ──────────────────────────────────────────
-   echo "💾 Backing up sshd_config..."
-   sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-   echo "✅ Backup saved to /etc/ssh/sshd_config.bak"
-   echo ""
-fi
+sudo install -d -m 755 /etc/ssh/sshd_config.d
+sudo tee "$MANAGED_CONFIG" >/dev/null <<'CONFIG'
+# Managed by dotfiles-server. Preserve existing password and root login policy.
+PubkeyAuthentication yes
+MaxAuthTries 3
+X11Forwarding no
+CONFIG
+sudo chmod 644 "$MANAGED_CONFIG"
 
-# ── Security settings (always applied) ─────────────────────
-echo "🔧 Applying security settings..."
-
-# Ubuntu 22.04+ / Debian 12+ ship drop-in configs that override the main file
-if [ -d /etc/ssh/sshd_config.d ]; then
-   for conf in /etc/ssh/sshd_config.d/*.conf; do
-      [ -f "$conf" ] || continue
-      sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$conf"
-      sudo sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication no/' "$conf"
-      sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' "$conf"
-   done
-fi
-
-sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config
-echo "   🔒 Root login disabled"
-echo "   🔑 Password authentication enabled"
-echo "   🔒 Public key authentication disabled"
-echo "   🔒 MaxAuthTries = 3"
-echo "   🔒 X11Forwarding disabled"
-
-# ── Enable and start ──────────────────────────────────────
-echo ""
-echo "⚙️  Validating config and restarting SSH service..."
-if ! sudo sshd -t; then
-   err "sshd_config has syntax errors — NOT restarting. Fix the config first."
+# OpenSSH uses the first value; keep this include before existing directives.
+{
+   printf 'Include %s\n' "$MANAGED_CONFIG"
+   sudo sed '\|^Include /etc/ssh/sshd_config.d/00-dotfiles-server.conf$|d' "$MAIN_CONFIG"
+} > "$TEMP_CONFIG"
+sudo install -m 600 "$TEMP_CONFIG" "$MAIN_CONFIG"
+sudo /usr/sbin/sshd -t
+EFFECTIVE_CONFIG=$(sudo /usr/sbin/sshd -T)
+if ! printf '%s\n' "$EFFECTIVE_CONFIG" | grep -qx 'pubkeyauthentication yes'; then
+   err "Public key authentication is not enabled; refusing to reload SSH"
    exit 1
+fi
+
+# Allow the configured and current session ports before any service reload.
+SSH_PORTS=$(ssh_ports)
+if command -v ufw >/dev/null && sudo ufw status | grep -q '^Status: active'; then
+   for port in $SSH_PORTS; do
+      sudo ufw limit "$port/tcp"
+   done
 fi
 sudo systemctl enable ssh
 sudo systemctl reload ssh 2>/dev/null || sudo systemctl restart ssh
-echo "✅ SSH service is running"
+rm -f "$TEMP_CONFIG"
+trap - EXIT
 
-echo ""
-
-# effective port (respects a custom Port directive)
-SSH_PORT=$(sudo sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
-SSH_PORT="${SSH_PORT:-22}"
-
-# ── Verification ───────────────────────────────────────────
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🔍 Running verification checks..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# 1. sshd binary exists
-echo "1️⃣  sshd binary"
-if command -v sshd &>/dev/null; then
-   pass "sshd found at $(command -v sshd)"
+if systemctl is-active --quiet ssh && systemctl is-enabled --quiet ssh; then
+   pass "SSH is active and enabled on boot"
 else
-   fail "sshd binary not found"
+   fail "SSH service is not active/enabled"
 fi
-
-# 2. Config syntax valid
-echo "2️⃣  Config syntax"
-if sudo sshd -t 2>/dev/null; then
-   pass "sshd_config syntax is valid"
-else
-   fail "sshd_config has syntax errors — run 'sudo sshd -t' to see details"
-fi
-
-# 3. Service active
-echo "3️⃣  Service status"
-if systemctl is-active --quiet ssh; then
-   pass "ssh.service is active"
-else
-   fail "ssh.service is NOT active"
-fi
-
-# 4. Service enabled on boot
-echo "4️⃣  Autostart on boot"
-if systemctl is-enabled --quiet ssh; then
-   pass "ssh.service is enabled (will start on boot)"
-else
-   fail "ssh.service is NOT enabled for autostart"
-fi
-
-# 5. SSH port is listening
-echo "5️⃣  Port listening"
-if ss -tlnp | grep -q ":${SSH_PORT}\b"; then
-   pass "sshd is listening on port $SSH_PORT"
-else
-   fail "nothing is listening on port $SSH_PORT"
-fi
-
-# 6. sshd process running
-echo "6️⃣  Process check"
-SSHD_PID=$(pgrep -x sshd | head -1 || true)
-if [ -n "$SSHD_PID" ]; then
-   pass "sshd process running (PID $SSHD_PID)"
-else
-   fail "no sshd process found"
-fi
-
-# 7. Loopback connection test
-echo "7️⃣  Connection test (localhost)"
-if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -p "$SSH_PORT" localhost exit 2>/dev/null; then
-   pass "localhost SSH connection successful"
-else
-   if ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -p "$SSH_PORT" localhost exit 2>&1 | grep -qi "permission denied"; then
-      pass "sshd responds on localhost (auth required — expected)"
-   else
-      fail "could not connect to sshd on localhost"
-   fi
-fi
-
-# 8. Security settings applied
-echo "8️⃣  Security settings"
-if sudo sshd -T 2>/dev/null | grep -qi "permitrootlogin no"; then
-   pass "PermitRootLogin is disabled"
-else
-   fail "PermitRootLogin is NOT set to 'no'"
-fi
-
-if sudo sshd -T 2>/dev/null | grep -qi "passwordauthentication yes"; then
-   pass "PasswordAuthentication is enabled"
-else
-   fail "PasswordAuthentication is NOT enabled"
-fi
-
-if sudo sshd -T 2>/dev/null | grep -qi "pubkeyauthentication no"; then
-   pass "PubkeyAuthentication is disabled"
-else
-   fail "PubkeyAuthentication is NOT disabled"
-fi
-
-# 9. Host keys exist
-echo "9️⃣  Host keys"
-KEY_COUNT=$(ls /etc/ssh/ssh_host_*_key 2>/dev/null | wc -l)
-if [ "$KEY_COUNT" -gt 0 ]; then
-   pass "$KEY_COUNT host key(s) present"
-else
-   fail "no host keys found in /etc/ssh/"
-fi
-
-# 10. Firewall check (if ufw is installed)
-echo "🔟 Firewall"
-if command -v ufw &>/dev/null; then
-   if sudo ufw status 2>/dev/null | grep -q "inactive"; then
-      pass "ufw is inactive (port $SSH_PORT not blocked)"
-   elif sudo ufw status 2>/dev/null | grep -qE "${SSH_PORT}(/tcp)?[[:space:]]+(ALLOW|LIMIT)"; then
-      pass "ufw allows port $SSH_PORT"
-   else
-      fail "ufw is active but port $SSH_PORT may not be allowed — run 'sudo ufw limit ssh'"
-   fi
-else
-   pass "ufw not installed (no firewall blocking)"
-fi
-
-# ── Summary ────────────────────────────────────────────────
+pass "SSH configuration is valid; public key authentication is enabled"
 check_summary
-echo ""
-
-# ── Connection info ────────────────────────────────────────
-echo "🌐 Server IP addresses:"
-hostname -I | tr ' ' '\n' | while read -r ip; do
-   [ -n "$ip" ] && echo "   → $ip"
-done
-echo ""
-PORT_FLAG=""
-[ "$SSH_PORT" != "22" ] && PORT_FLAG=" -p $SSH_PORT"
-echo "🎉 Connect with:"
-echo "   ssh$PORT_FLAG $(whoami)@<IP>"
-echo ""
-echo "🔑 Password auth only (public key auth is disabled)."
+info "Backup: $BACKUP_DIR"
+info "SSH ports: $(printf '%s\n' "$SSH_PORTS" | paste -sd, -)"
+info "Test key login in a second session before disabling password or root login."

@@ -36,6 +36,16 @@ check_summary() {
       echo "⚠️  $CHECKS_PASSED passed, $CHECKS_FAILED failed"
    fi
    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+   [ "$CHECKS_FAILED" -eq 0 ]
+}
+
+# Include the port of the active session (also covers SSH socket activation).
+ssh_ports() {
+   local config session_port
+   config=$(sudo /usr/sbin/sshd -T) || return 1
+   session_port=$(printf '%s\n' "${SSH_CONNECTION:-}" | awk '{print $4}')
+   { printf '%s\n' "$config" | awk '$1 == "port" {print $2}'; printf '%s\n' "$session_port"; } |
+      awk '/^[0-9]+$/ && $1 > 0 && $1 < 65536 && !seen[$1]++ {print $1}'
 }
 
 # ── OS Detection ───────────────────────────────────────────

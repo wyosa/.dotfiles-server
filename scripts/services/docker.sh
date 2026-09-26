@@ -22,47 +22,13 @@ esac
 echo "   OS: $OS_ID $VERSION_ID ($OS_CODENAME)"
 echo ""
 
-# ── Check if already installed and running ─────────────────
-if command -v docker &>/dev/null; then
-   echo "📌 Docker is already installed"
-   echo "   🐳 $(docker --version)"
-   if docker compose version &>/dev/null; then
-      echo "   📦 Docker Compose $(docker compose version --short)"
-   else
-      echo "   ⚠️  Docker Compose plugin not found"
-   fi
-   if systemctl is-active --quiet docker; then
-      echo "✅ Docker service is already running"
-   else
-      echo "⚠️  Docker is installed but not running, starting..."
-      sudo systemctl enable docker
-      sudo systemctl start docker
-      echo "✅ Docker service started"
-   fi
-else
-   # ── Uninstall old versions ─────────────────────────────────
-   echo "🧹 Removing old/conflicting packages..."
-   sudo apt remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc 2>/dev/null || true
-   echo "✅ Old packages removed"
-   echo ""
-
-   # ── Install prerequisites ──────────────────────────────────
-   echo "📦 Installing prerequisites..."
+# Install only missing components; keep an existing Docker engine.
+setup_repository() {
    sudo apt update -qq
    sudo apt install -y -qq ca-certificates curl
-   echo "✅ Prerequisites installed"
-   echo ""
-
-   # ── Add Docker GPG key ─────────────────────────────────────
-   echo "🔑 Adding Docker's official GPG key..."
    sudo install -m 0755 -d /etc/apt/keyrings
    sudo curl -fsSL "$DOCKER_REPO/gpg" -o /etc/apt/keyrings/docker.asc
    sudo chmod a+r /etc/apt/keyrings/docker.asc
-   echo "✅ GPG key added"
-   echo ""
-
-   # ── Add Docker repository ─────────────────────────────────
-   echo "📋 Adding Docker apt repository..."
    sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
 Types: deb
 URIs: $DOCKER_REPO
@@ -71,29 +37,24 @@ Components: stable
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
    sudo apt update -qq
-   echo "✅ Repository added ($DOCKER_REPO)"
-   echo ""
+}
 
-   # ── Install Docker Engine ──────────────────────────────────
-   echo "🐳 Installing Docker Engine & Docker Compose..."
+if command -v docker >/dev/null; then
+   info "$(docker --version) is already installed"
+   if ! docker compose version >/dev/null 2>&1; then
+      info "Installing the missing Docker Compose plugin..."
+      setup_repository
+      sudo apt install -y -qq docker-compose-plugin
+   fi
+else
+   sudo apt remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc 2>/dev/null || true
+   setup_repository
    sudo apt install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-   echo "✅ Docker installed"
-   echo ""
-
-   # ── Enable & start Docker ─────────────────────────────────
-   echo "⚙️  Enabling Docker service..."
-   sudo systemctl enable docker
-   sudo systemctl start docker
-   echo "✅ Docker service is running"
-   echo ""
-
-   # ── Add current user to docker group ──────────────────────
-   echo "👤 Adding user '$(whoami)' to docker group..."
-   sudo usermod -aG docker "$(whoami)"
-   echo "✅ User added to docker group"
 fi
 
-echo ""
+sudo systemctl enable --now docker
+DOCKER_USER="${SUDO_USER:-$(id -un)}"
+sudo usermod -aG docker "$DOCKER_USER"
 
 # ── Verification ───────────────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -140,7 +101,7 @@ check_summary
 echo ""
 
 # ── Post-install notes ─────────────────────────────────────
-if ! id -nG "$(whoami)" | grep -qw docker; then
+if [ "$DOCKER_USER" != root ]; then
    echo "⚠️  Log out and log back in for docker group to take effect,"
    echo "   or run: newgrp docker"
    echo ""
