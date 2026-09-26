@@ -20,7 +20,7 @@ PACKAGES=(
    ncdu
    # network
    net-tools
-   dnsutils
+   bind9-dnsutils
    iproute2
    # editors
    vim
@@ -66,7 +66,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 for pkg in "${PACKAGES[@]}"; do
-   if dpkg -s "$pkg" &>/dev/null; then
+   if [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null)" = installed ]; then
       pass "$pkg"
    else
       fail "$pkg NOT installed"

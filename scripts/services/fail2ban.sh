@@ -12,8 +12,16 @@ if command -v fail2ban-server &>/dev/null; then
    echo "📌 Fail2ban is already installed"
 else
    echo "📦 Installing fail2ban..."
-   sudo apt update -qq && sudo apt install -y -qq fail2ban
+   sudo apt update -qq
+   sudo apt install -y -qq fail2ban
    echo "✅ Fail2ban installed"
+fi
+
+# The systemd backend needs journal support, even on existing installs.
+if ! /usr/bin/python3 -c 'from systemd import journal' &>/dev/null; then
+   echo "📦 Installing Python systemd journal support..."
+   sudo apt update -qq
+   sudo apt install -y -qq python3-systemd
 fi
 
 echo ""
@@ -47,7 +55,17 @@ echo "⚙️  Enabling and starting Fail2ban..."
 sudo fail2ban-client -t
 sudo systemctl enable fail2ban
 sudo systemctl restart fail2ban
-echo "✅ Fail2ban is running"
+
+# An active systemd service does not mean its jails have finished loading.
+echo "⏳ Waiting for the sshd jail..."
+JAIL_READY=false
+for ((attempt = 0; attempt < 30; attempt++)); do
+   if JAIL_STATUS=$(sudo fail2ban-client status sshd 2>&1); then
+      JAIL_READY=true
+      break
+   fi
+   sleep 1
+done
 
 echo ""
 
@@ -83,11 +101,13 @@ fi
 
 # 4. SSH jail active
 echo "4️⃣  SSH jail"
-if sudo fail2ban-client status sshd &>/dev/null; then
-   BANNED=$(sudo fail2ban-client get sshd banned 2>/dev/null || echo "0")
-   pass "sshd jail is active ($BANNED currently banned)"
+if [ "$JAIL_READY" = true ]; then
+   pass "sshd jail is active"
 else
-   fail "sshd jail is NOT active"
+   fail "sshd jail did not become ready"
+   printf '%s\n' "$JAIL_STATUS"
+   sudo journalctl -u fail2ban -n 30 --no-pager || true
+   sudo tail -n 30 /var/log/fail2ban.log 2>/dev/null || true
 fi
 
 # 5. Config file exists
